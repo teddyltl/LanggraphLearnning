@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>LangGraph 单线知识系统 · 交互侧栏（稳健修复版）</title>
+<title>LangGraph 单线知识系统 · 交互侧栏（增强解析版）</title>
 <style>
   :root{--bg:#fff;--fg:#111;--muted:#666;--accent:#4b70ff;}
   @media (prefers-color-scheme: dark){
@@ -27,6 +27,7 @@
   .toolbar textarea{flex:1;padding:6px 8px;border:1px solid #d1d5db;border-radius:8px;background:transparent;color:var(--fg);min-height:120px;resize:vertical}
   .btn{padding:6px 10px;border:1px solid #d1d5db;border-radius:8px;background:transparent;color:var(--fg);cursor:pointer}
   .btn:hover{border-color:var(--accent)}
+  .debug-info{font-size:12px;color:var(--muted);margin-top:10px;padding:8px;border:1px solid #e5e7eb;border-radius:4px;background:rgba(0,0,0,0.02)}
   @media (max-width: 860px){ .wrap{grid-template-columns:1fr} #side{position:static;max-height:none} }
 </style>
 </head>
@@ -34,23 +35,19 @@
 <div class="wrap">
   <section class="panel">
     <h2 class="title">主流程</h2>
-    <!-- 重要：去掉 class="mermaid"，我们手动 render，避免自动扫描 & 二次解析 -->
     <div id="chart"></div>
     <p class="hint">提示：将鼠标悬停或点击节点，可在右侧查看该层所有知识点。</p>
     <details>
-      <summary>可选：粘贴"知识点汇总_合并.mmd"文件内容，一键解析为侧栏数据</summary>
+      <summary>粘贴"知识点汇总_合并_提示词版.mmd"文件内容，一键解析为侧栏数据</summary>
       <div class="toolbar" style="margin-top:8px">
-        <textarea id="raw" rows="6" placeholder="粘贴知识点汇总_合并.mmd的内容后点『解析』，或点击『快速演示』加载示例数据"></textarea>
+        <textarea id="raw" rows="6" placeholder="粘贴知识点汇总_合并_提示词版.mmd的内容后点『解析』，或点击『快速演示』加载示例数据"></textarea>
         <button class="btn" id="parseBtn">解析</button>
         <button class="btn" id="demoBtn">快速演示</button>
       </div>
-      <pre style="white-space:pre-wrap;color:var(--muted);margin:0">
-格式说明（按概念分类组织）：
-C1["概念：环境配置与密钥管理"]
-K_1_0__K13["[1.0] module_0 / basics：「环境准备 解决了 运行失败与配置缺失（做法：安装依赖+配置密钥）」"]
-C1 --> L0
-K_1_0__K13 --> C1
-      </pre>
+      <div class="debug-info" id="debug-info" style="display:none">
+        <strong>解析调试信息：</strong>
+        <div id="parse-debug"></div>
+      </div>
     </details>
   </section>
 
@@ -59,12 +56,12 @@ K_1_0__K13 --> C1
     <div class="toolbar">
       <input id="filter" type="text" placeholder="输入关键字快速筛选（例如：Router / 记忆 / thread_id）"/>
       <button class="btn" id="pin">📌 置顶/取消</button>
+      <button class="btn" id="debug-toggle">🔧 调试</button>
     </div>
     <ol id="kp-list"></ol>
   </aside>
 </div>
 
-<!-- 不直接写 mermaid 的 <script src=...>，而是用 JS 按需加载并做多源回退 -->
 <script>
 (async () => {
   const chartEl = document.getElementById("chart");
@@ -73,7 +70,7 @@ K_1_0__K13 --> C1
       `<pre style="white-space:pre-wrap;line-height:1.4;color:#ef4444">${msg}</pre>`;
   };
 
-  // 多CDN回退加载器：jsDelivr → unpkg → staticfile
+  // 多CDN回退加载器
   async function ensureMermaidLoaded() {
     if (window.mermaid) return;
     const cdns = [
@@ -97,22 +94,21 @@ K_1_0__K13 --> C1
   }
 
   try {
-    await ensureMermaidLoaded(); // 解决“脚本没加载导致页面空白”
+    await ensureMermaidLoaded();
   } catch (e) {
-    showError("无法加载 Mermaid 库，请检查网络或更换 CDN。\n\n" + e.message +
-      "\n\n（可将 mermaid.min.js 放到本地并用 <script src=\"./mermaid.min.js\"> 引入）");
+    showError("无法加载 Mermaid 库，请检查网络或更换 CDN。\n\n" + e.message);
     return;
   }
 
-  // 初始化（关闭自动扫描；允许 HTML 标签；暗色主题自适应）
+  // 初始化Mermaid
   mermaid.initialize({
-    startOnLoad: false, // 阻止自动 run（官方推荐高级集成用 run/render） :contentReference[oaicite:3]{index=3}
-    securityLevel: "loose", // 允许点击/标签（官方文档示例） :contentReference[oaicite:4]{index=4}
+    startOnLoad: false,
+    securityLevel: "loose",
     theme: matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "default",
     flowchart: { curve: "linear", htmlLabels: true, rankSpacing: 60, nodeSpacing: 40 }
   });
 
-  // 主流程：方括号全部用实体转义，避免被当作“矩形节点语法”的结束符（官方建议用实体编码规避“会破坏语法的字符”） :contentReference[oaicite:5]{index=5}
+  // 主流程图
   const FLOW = `
 flowchart TD
   L0["#91;0#93; 入口层：输入与上下文 (config)"]
@@ -132,25 +128,27 @@ flowchart TD
   class L0,L1,L2,L3,L4,L5,L6,L7,L8,L9,L10,L11 layer;
 `;
 
-  // 推荐流程：parse 校验 → render（v10 起 render 为 async，必须 await） :contentReference[oaicite:6]{index=6}
+  // 渲染主流程图
   try {
-    await mermaid.parse(FLOW); // 语法不通过会抛错（或在 suppressErrors 时返回 false） :contentReference[oaicite:7]{index=7}
+    await mermaid.parse(FLOW);
     const { svg, bindFunctions } = await mermaid.render("graph-main", FLOW);
     chartEl.innerHTML = svg;
     bindFunctions?.(chartEl);
   } catch (err) {
-    showError("Mermaid 解析/渲染失败：\n\n" + (err && err.message ? err.message : String(err)) +
-      "\n\n若报与文本相关的错误，优先检查节点标题是否含未转义的特殊字符。");
+    showError("Mermaid 解析/渲染失败：\n\n" + (err && err.message ? err.message : String(err)));
     return;
   }
 
-  // ===== 右侧侧栏（简化版显示与筛选） =====
+  // ===== 侧栏数据结构和逻辑 =====
   const KNOWLEDGE = { L0:{}, L1:{}, L2:{}, L3:{}, L4:{}, L5:{}, L6:{}, L7:{}, L8:{}, L9:{}, L10:{}, L11:{} };
   const listEl   = document.getElementById("kp-list");
   const titleEl  = document.getElementById("side-title");
   const filterEl = document.getElementById("filter");
   const pinBtn   = document.getElementById("pin");
-  let pinned = false, currentLayer = null;
+  const debugToggle = document.getElementById("debug-toggle");
+  const debugInfo = document.getElementById("debug-info");
+  const parseDebug = document.getElementById("parse-debug");
+  let pinned = false, currentLayer = null, debugMode = false;
 
   function renderList(layerId){
     currentLayer = layerId;
@@ -177,7 +175,7 @@ flowchart TD
 
     if (concepts.length === 0) {
       const li = document.createElement("li");
-      li.innerHTML = `<span style="color:var(--muted)">（该层暂无内容，可在下方粘贴 .mmd 后点击“解析”导入）</span>`;
+      li.innerHTML = `<span style="color:var(--muted)">（该层暂无内容，可在下方粘贴 .mmd 后点击"解析"导入）</span>`;
       listEl.appendChild(li);
       return;
     }
@@ -206,12 +204,19 @@ flowchart TD
       listEl.appendChild(subList);
     });
   }
+
+  // 事件处理
   filterEl.addEventListener("input", ()=> currentLayer && renderList(currentLayer));
   function updatePinUI(){ pinBtn.textContent = pinned ? "📌 已置顶（点击取消）" : "📌 置顶/取消"; }
   pinBtn.addEventListener("click", ()=>{ pinned = !pinned; updatePinUI(); });
+  debugToggle.addEventListener("click", ()=>{
+    debugMode = !debugMode;
+    debugInfo.style.display = debugMode ? "block" : "none";
+    debugToggle.textContent = debugMode ? "🔧 调试中" : "🔧 调试";
+  });
   updatePinUI();
 
-  // 绑定 hover / click 到 SVG（事件委托）
+  // 绑定 hover/click 事件
   const svg = chartEl.querySelector("svg");
   function extractLayerIdFrom(el){
     if(!el) return null;
@@ -228,80 +233,227 @@ flowchart TD
     svg.addEventListener("click",       (e)=>{ const lid = extractLayerIdFrom(e.target); if(lid){ renderList(lid); pinned = true; updatePinUI(); }});
   }
 
-  // 解析“知识点汇总_合并.mmd”→ 侧栏（只支持 K↔C 边 与 简单标题）
-  document.getElementById("parseBtn").addEventListener("click", ()=>{
-    const raw = (document.getElementById("raw").value || "");
-    Object.keys(KNOWLEDGE).forEach(k=>KNOWLEDGE[k]={});
-    const knowledgeMap = {};
-    raw.replace(/(K_[A-Za-z0-9_]+)\s*\[\s*"([^"]+)"\s*\]/g,(m,id,label)=> (knowledgeMap[id]=label, m));
-    const lines = raw.split(/\r?\n/); let currentLayer = null; const layerConcepts = {}; const layerHeadings = {};
-    const ensure = (o,k,v)=> (o[k]??=(v||{}), o[k]);
-    lines.forEach(line=>{
-      const b=line.match(/%%\s*----\s*Begin:\s*(L\d+)_/); if(b){currentLayer=b[1]; ensure(layerConcepts,currentLayer,{}); ensure(layerHeadings,currentLayer,[]); return;}
-      const e=line.match(/%%\s*----\s*End:\s*(L\d+)_/); if(e && currentLayer===e[1]){currentLayer=null; return;}
-      if(!currentLayer) return;
-      const mC=line.match(/(C\d+)\s*\[\s*"([^"]+)"/); if(mC){ ensure(layerConcepts,currentLayer,{}); layerConcepts[currentLayer][mC[1]]=mC[2]; }
-      const mH=line.match(/%%\s*#{1,3}\s*(概念[:：][^\n\r]+)/) || line.match(/^(概念[:：](?:C\d+_)?[^\n\r]+)$/);
-      if(mH){ layerHeadings[currentLayer].push((mH[1]||mH[0]).trim()); }
-    });
+  // ===== 增强版解析器 =====
+  function parseEnhanced(rawText) {
+    const debugLog = [];
+    const layers = new Map();
+    
+    // 清空现有数据
+    Object.keys(KNOWLEDGE).forEach(k => KNOWLEDGE[k] = {});
 
-    const conceptTitleMap = {};
-    function ensureEntry(layer, compId, title){ KNOWLEDGE[layer][compId] ??= { title, points: [] }; if(title && !KNOWLEDGE[layer][compId].title) KNOWLEDGE[layer][compId].title=title; }
-    function pushPoint(layer, compId, kId){ const t=knowledgeMap[kId]||kId; ensureEntry(layer, compId, conceptTitleMap[compId]); KNOWLEDGE[layer][compId].points.push(t); }
-
-    currentLayer=null; let headIdx=-1; let headTitle=null;
-    lines.forEach(line=>{
-      const b=line.match(/%%\s*----\s*Begin:\s*(L\d+)_/); if(b){currentLayer=b[1]; headIdx=-1; headTitle=null; return;}
-      const e=line.match(/%%\s*----\s*End:\s*(L\d+)_/); if(e && currentLayer===e[1]){currentLayer=null; return;}
-      if(!currentLayer) return;
-
-      const mH=line.match(/%%\s*#{1,3}\s*(概念[:：][^\n\r]+)/) || line.match(/^(概念[:：](?:C\d+_)?[^\n\r]+)$/);
-      if(mH){ headIdx++; headTitle=(mH[1]||mH[0]).trim(); return; }
-
-      const mKC=line.match(/(K_[A-Za-z0-9_]+)\s*-->\s*(C\d+)/g);
-      if(mKC){ mKC.forEach(edge=>{ const m=edge.match(/(K_[A-Za-z0-9_]+)\s*-->\s*(C\d+)/); if(!m) return; const [_,kId,cId]=m; const title=(layerConcepts[currentLayer]||{})[cId]; if(title){ const comp=`${currentLayer}#${cId}`; conceptTitleMap[comp]=title; pushPoint(currentLayer,comp,kId);} }); return; }
-
-      const mCK=line.match(/(C\d+)\s*-->\s*(K_[A-Za-z0-9_]+)/g);
-      if(mCK){ mCK.forEach(edge=>{ const m=edge.match(/(C\d+)\s*-->\s*(K_[A-Za-z0-9_]+)/); if(!m) return; const [_,cId,kId]=m; const title=(layerConcepts[currentLayer]||{})[cId]; if(title){ const comp=`${currentLayer}#${cId}`; conceptTitleMap[comp]=title; pushPoint(currentLayer,comp,kId);} }); return; }
-
-      if(headTitle && (layerHeadings[currentLayer]||[]).length>0){
-        const mK=line.trim().match(/^(K_[A-Za-z0-9_]+)\s*\[/);
-        if(mK){ const kId=mK[1]; const comp=`${currentLayer}#H${headIdx}`; conceptTitleMap[comp]=headTitle; pushPoint(currentLayer,comp,kId); }
+    // 按层分别提取和解析，避免跨层ID冲突
+    const layerContents = new Map();
+    
+    // 首先分割出各层内容
+    const layerRegex = /%%\s*----\s*Begin:\s*(L\d+)_[\s\S]*?%%\s*----\s*End:\s*\1_/g;
+    let layerMatch;
+    while ((layerMatch = layerRegex.exec(rawText)) !== null) {
+      const layerId = layerMatch[0].match(/Begin:\s*(L\d+)_/)[1];
+      layerContents.set(layerId, layerMatch[0]);
+      debugLog.push(`提取到 ${layerId} 层内容`);
+    }
+    
+    // 按层解析每一层
+    for (const [layerId, layerContent] of layerContents) {
+      debugLog.push(`\n=== 开始解析 ${layerId} 层 ===`);
+      
+      // 为当前层创建局部知识点映射，避免跨层污染
+      const localKnowledgeMap = new Map();
+      
+      // 提取当前层的知识点（包括KC节点）
+      const knowledgeRegex = /(K(?:C?_)?[A-Za-z0-9_]+|KC\d+)\s*\[\s*"([^"]+(?:「[^」]*」[^"]*)?(?:[^"]*「[^」]*」)*[^"]*)"\s*\]/g;
+      let kMatch;
+      while ((kMatch = knowledgeRegex.exec(layerContent)) !== null) {
+        const [fullMatch, kId, content] = kMatch;
+        localKnowledgeMap.set(kId, content);
+        debugLog.push(`${layerId}: ${kId} -> ${content.substring(0, 50)}...`);
       }
-    });
+      
+      debugLog.push(`${layerId} 层提取到 ${localKnowledgeMap.size} 个知识点`);
+      
+      // 解析当前层的结构
+      const lines = layerContent.split('\n');
+      let currentConcept = null;
+      let conceptCounter = 0;
+      const layerConceptMap = new Map();
 
-    // 去重
-    Object.keys(KNOWLEDGE).forEach(layer=>{
-      Object.values(KNOWLEDGE[layer]).forEach(x=>{
-        const seen=new Set(); x.points=x.points.filter(p=>!seen.has(p)&&(seen.add(p),true));
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i].trim();
+        if (!line) continue;
+
+        // Mermaid概念节点
+        const mermaidConceptMatch = line.match(/^(C\d+)\s*\[\s*"([^"]+)"\s*\]/);
+        if (mermaidConceptMatch) {
+          const [, cId, title] = mermaidConceptMatch;
+          currentConcept = `${layerId}#${cId}`;
+          KNOWLEDGE[layerId][currentConcept] = { title, points: [] };
+          layerConceptMap.set(cId, currentConcept);
+          debugLog.push(`${layerId}: Mermaid概念 ${cId} -> ${title}`);
+          continue;
+        }
+
+        // 文本概念标题
+        const textConceptMatch = line.match(/^概念[:：](.+)$/);
+        if (textConceptMatch) {
+          conceptCounter++;
+          const title = textConceptMatch[1].trim();
+          currentConcept = `${layerId}#T${conceptCounter}`;
+          KNOWLEDGE[layerId][currentConcept] = { title: `概念：${title}`, points: [] };
+          debugLog.push(`${layerId}: 文本概念 -> 概念：${title}`);
+          continue;
+        }
+
+        // L2层等：按注释识别概念分组
+        if (layerId === 'L2') {
+          const conceptGroupMatch = line.match(/%%\s*概念(\d+)[:：]/);
+          if (conceptGroupMatch) {
+            const conceptNum = conceptGroupMatch[1];
+            const cId = `C${conceptNum}`;
+            currentConcept = layerConceptMap.get(cId);
+            if (currentConcept) {
+              debugLog.push(`${layerId}: 切换到概念组 ${cId}`);
+            }
+            continue;
+          }
+        }
+
+        // L10层等：K节点到C节点的连接关系 K_C1__ALL --> C1（必须在一般知识点处理前）
+        if (layerId === 'L10') {
+          const kcConnectionMatch = line.match(/^(K_C\d+__[A-Za-z0-9_]+)\s*-->\s*(C\d+)/);
+          if (kcConnectionMatch) {
+            const [, kId, cId] = kcConnectionMatch;
+            const content = localKnowledgeMap.get(kId);
+            const targetConcept = layerConceptMap.get(cId);
+            if (content && targetConcept) {
+              KNOWLEDGE[layerId][targetConcept].points.push(content);
+              debugLog.push(`${layerId}: K节点连接关系 ${kId} --> ${cId} 添加知识点到 ${targetConcept}`);
+            }
+            continue;
+          }
+        }
+
+        // 知识点节点
+        const knowledgeMatch = line.match(/^(K(?:C?_)?[A-Za-z0-9_]+)\s*\[/);
+        if (knowledgeMatch) {
+          const kId = knowledgeMatch[1];
+          const content = localKnowledgeMap.get(kId); // 使用当前层的知识点映射
+          if (content) {
+            // L10层：跳过已在连接关系中处理的K_C*__ALL节点
+            if (layerId === 'L10' && kId.match(/^K_C\d+__/)) {
+              continue;
+            }
+            
+            // 对于L2层，根据K节点的前缀推断概念归属
+            let targetConcept = currentConcept;
+            if (layerId === 'L2') {
+              const kPrefixMatch = kId.match(/K_(\d+)__/);
+              if (kPrefixMatch) {
+                const conceptNum = kPrefixMatch[1];
+                const cId = `C${conceptNum}`;
+                targetConcept = layerConceptMap.get(cId);
+              }
+            }
+
+            if (targetConcept && KNOWLEDGE[layerId][targetConcept]) {
+              KNOWLEDGE[layerId][targetConcept].points.push(content);
+              debugLog.push(`${layerId}: 知识点 ${kId} 添加到 ${targetConcept}`);
+            } else if (currentConcept) {
+              KNOWLEDGE[layerId][currentConcept].points.push(content);
+              debugLog.push(`${layerId}: 知识点 ${kId} 添加到当前概念 ${currentConcept}`);
+            } else {
+              // 默认概念
+              const defaultConcept = `${layerId}#DEFAULT`;
+              if (!KNOWLEDGE[layerId][defaultConcept]) {
+                KNOWLEDGE[layerId][defaultConcept] = { title: "其他知识点", points: [] };
+              }
+              KNOWLEDGE[layerId][defaultConcept].points.push(content);
+              debugLog.push(`${layerId}: 知识点 ${kId} 添加到默认概念`);
+            }
+          }
+          continue;
+        }
+
+        // L8层特殊处理：连接关系语法 C1 --> KC1["内容"]
+        if (layerId === 'L8') {
+          const connectionMatch = line.match(/^(C\d+)\s*-->\s*(KC\d+)\s*\[/);
+          if (connectionMatch) {
+            const [, cId, kcId] = connectionMatch;
+            const content = localKnowledgeMap.get(kcId); // 使用当前层的知识点映射
+            const targetConcept = `${layerId}#${cId}`;
+            if (content && KNOWLEDGE[layerId][targetConcept]) {
+              KNOWLEDGE[layerId][targetConcept].points.push(content);
+              debugLog.push(`${layerId}: 连接关系 ${cId} --> ${kcId} 添加知识点到 ${targetConcept}`);
+            }
+            continue;
+          }
+        }
+      }
+    }
+
+    // 去重处理
+    Object.keys(KNOWLEDGE).forEach(layer => {
+      Object.values(KNOWLEDGE[layer]).forEach(conceptData => {
+        if (conceptData.points) {
+          const seen = new Set();
+          conceptData.points = conceptData.points.filter(point => {
+            if (seen.has(point)) return false;
+            seen.add(point);
+            return true;
+          });
+        }
       });
     });
 
+    // 统计信息
+    let totalConcepts = 0, totalPoints = 0;
+    Object.keys(KNOWLEDGE).forEach(layer => {
+      const layerConcepts = Object.keys(KNOWLEDGE[layer]).length;
+      const layerPoints = Object.values(KNOWLEDGE[layer]).reduce((sum, c) => sum + (c.points ? c.points.length : 0), 0);
+      totalConcepts += layerConcepts;
+      totalPoints += layerPoints;
+      if (layerConcepts > 0) {
+        debugLog.push(`${layer}: ${layerConcepts} 个概念, ${layerPoints} 个知识点`);
+      }
+    });
+    debugLog.push(`总计: ${totalConcepts} 个概念, ${totalPoints} 个知识点`);
+
+    return debugLog;
+  }
+
+  // 解析按钮事件
+  document.getElementById("parseBtn").addEventListener("click", () => {
+    const rawText = document.getElementById("raw").value || "";
+    if (!rawText.trim()) {
+      alert("请先粘贴文件内容");
+      return;
+    }
+
+    const debugLog = parseEnhanced(rawText);
+    parseDebug.innerHTML = debugLog.join('<br>');
+
     renderList(currentLayer || "L0");
-    alert("解析完成！可在右侧查看该层概念与知识点。");
+    alert(`解析完成！共解析 ${debugLog[debugLog.length - 1]}。可在右侧查看各层知识点。`);
   });
 
   // 演示数据
-  document.getElementById("demoBtn").addEventListener("click", ()=>{
-    document.getElementById("raw").value = `
+  document.getElementById("demoBtn").addEventListener("click", () => {
+    document.getElementById("raw").value = `%% ---- Begin: L0_入口层_概念分类.mmd ----
 C1["概念：环境配置与密钥管理"]
-K_1_0__K13["[1.0] module_0 / basics：「环境准备 解决了 运行失败与配置缺失（做法：安装依赖+配置密钥）」"]
-K_1_0__K24["[1.0] module_0 / basics：「依赖安装 解决了 运行环境缺失（做法：pip 安装四个核心包）」"]
-K_1_0__K25["[1.0] module_0 / basics：「安全配置密钥 解决了 明文泄露风险（做法：getpass 设置环境变量）」"]
+K_C1__ALL["[合并] 环境/密钥/鉴权/模型参数：「统一依赖安装与环境变量(.env/.gitignore)管理密钥，设置 OPENAI_API_KEY / TAVILY_API_KEY 等；按需选择模型与温度——解决 运行失败 与 凭据泄露」"]
 
-C2["概念：状态管理与验证"]
-K_1_6__K23["[1.6] module_2 / state_schema：「Pydantic 解决了 运行时验证缺失（做法：BaseModel+field_validator）」"]
-K_1_6__K24["[1.6] module_2 / state_schema：「mood 校验 解决了 非法枚举值（做法：限定 'happy'/'sad'）」"]
+C2["概念：状态管理与验证"]  
+K_C2__ALL["[合并] 输入校验与清洗：「以 TypedDict / Pydantic 定义 state；在节点入参处执行 运行时校验，覆盖枚举/规则/默认值/类型转换；捕获 ValidationError 阻断无效输入传播——解决 不可信或脏输入」"]
+%% ---- End: L0_入口层_概念分类.mmd ----
 
-C1 --> L0
-C2 --> L1
+%% ---- Begin: L8_时间旅行_概念分类.mmd ----
+C1["概念：检查点管理"]
+C2["概念：重放机制"]
+C3["概念：分叉控制"]
+C4["概念：执行回滚"]
 
-K_1_0__K13 --> C1
-K_1_0__K24 --> C1
-K_1_0__K25 --> C1
-K_1_6__K23 --> C2
-K_1_6__K24 --> C2
-    `;
+C1 --> KC1["[合并] 检查点管理：「创建/恢复/一致性——按 thread_id 记录并加载历史 state；以服务端 checkpoint 为准对齐中断/取消后的状态；失败可回滚至最近 checkpoint」"]
+C2 --> KC2["[合并] 重放机制：「重放语义——input=None + 原config 在所选 checkpoint 继续；checkpoint 前严格复现、之后重执行并产生新分支；有 input 视为从该点开启新分支；终态重放：next 为空即结束；支持云端：checkpoint_id + None」"]
+%% ---- End: L8_时间旅行_概念分类.mmd ----`;
     alert("已加载演示数据到文本框，点击『解析』按钮即可查看效果！");
   });
 })();
