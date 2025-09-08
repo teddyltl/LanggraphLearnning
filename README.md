@@ -63,10 +63,9 @@
     <h2 id="side-title" class="title">悬停左侧节点查看知识点</h2>
     <div class="toolbar">
       <input id="filter" type="text" placeholder="输入关键字快速筛选（例如：Router / 记忆 / thread_id）"/>
-      <button class="btn" id="prev-layer">⬅️ 上一层</button>
-      <button class="btn" id="next-layer">➡️ 下一层</button>
-      <button class="btn" id="pin">📌 置顶/取消</button>
-      <button class="btn" id="debug-toggle">🔧 调试</button>
+      <button class="btn" id="prev-layer">⬆️ </button>
+      <button class="btn" id="next-layer">⬇️ </button>
+      <button class="btn" id="pin">📌 置顶</button>
     </div>
     <ol id="kp-list"></ol>
   </aside>
@@ -155,13 +154,12 @@ flowchart TD
   const titleEl  = document.getElementById("side-title");
   const filterEl = document.getElementById("filter");
   const pinBtn   = document.getElementById("pin");
-  const debugToggle = document.getElementById("debug-toggle");
   const debugInfo = document.getElementById("debug-info");
   const parseDebug = document.getElementById("parse-debug");
   const prevLayerBtn = document.getElementById("prev-layer");
   const nextLayerBtn = document.getElementById("next-layer");
   const layerOrder = ["L0", "L1", "L2", "L3", "L4", "L5", "L6", "L7", "L8", "L9", "L10", "L11"];
-  let pinned = false, currentLayer = null, debugMode = false;
+  let pinned = false, currentLayer = null;
 
   function renderList(layerId){
     currentLayer = layerId;
@@ -256,13 +254,9 @@ flowchart TD
 
   // 事件处理
   filterEl.addEventListener("input", ()=> currentLayer && renderList(currentLayer));
-  function updatePinUI(){ pinBtn.textContent = pinned ? "📌 已置顶（点击取消）" : "📌 置顶/取消"; }
+  function updatePinUI(){ pinBtn.textContent = pinned ? "📌 取消" : "📌 置顶"; }
   pinBtn.addEventListener("click", ()=>{ pinned = !pinned; updatePinUI(); });
-  debugToggle.addEventListener("click", ()=>{
-    debugMode = !debugMode;
-    debugInfo.style.display = debugMode ? "block" : "none";
-    debugToggle.textContent = debugMode ? "🔧 调试中" : "🔧 调试";
-  });
+  // 调试功能已移除
   
   // 导航按钮事件
   prevLayerBtn.addEventListener("click", () => navigateToLayer('prev'));
