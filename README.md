@@ -78,8 +78,7 @@ K_1_0__K13 --> C1
     });
 
     // 1) 固定主流程 Mermaid（只画 L0..L11）
-    const FLOW = `
-flowchart TD
+    const FLOW = `flowchart TD
   L0["[0] 入口层：输入与上下文 (config)"]
   L1["[1] 状态层：State & Reducer (MessagesState / add_messages)"]
   L2["[2] 决策层：模型调用与工具调用循环（预构建 ReAct 或自建）"]
@@ -93,8 +92,8 @@ flowchart TD
   L10["[10] 流式体验：values/updates/messages/custom/debug"]
   L11["[11] 可视化与部署：Studio/CLI/Platform + 监控与鉴权"]
   L0 --> L1 --> L2 --> L3 --> L4 --> L5 --> L6 --> L7 --> L8 --> L9 --> L10 --> L11
-  classDef layer fill:#eef2ff,stroke:#93c5fd,color:#1e3a8a;
-  class L0,L1,L2,L3,L4,L5,L6,L7,L8,L9,L10,L11 layer;
+  classDef layer fill:#eef2ff,stroke:#93c5fd,color:#1e3a8a
+  class L0,L1,L2,L3,L4,L5,L6,L7,L8,L9,L10,L11 layer
 `;
 
     // 2) 知识点数据结构：按层级分组，每层下按概念分类
@@ -117,6 +116,9 @@ flowchart TD
     const chartEl = document.getElementById("chart");
     chartEl.textContent = FLOW;
     try {
+      if (typeof mermaid.parse === "function") {
+        await mermaid.parse(FLOW);
+      }
       if (typeof mermaid.run === "function") {
         await mermaid.run({ nodes: [chartEl] });
       } else if (typeof mermaid.render === "function") {
@@ -127,8 +129,13 @@ flowchart TD
       }
     } catch (err) {
       console.error("Mermaid 渲染失败，尝试降级:", err);
-      const res = await mermaid.render("graph-main", FLOW);
-      chartEl.innerHTML = res.svg || res;
+      const fallback = "flowchart TD\nA[手机端兼容简化图]-->B[请改用桌面浏览器或刷新重试]";
+      try {
+        const res = await mermaid.render("graph-fallback", fallback);
+        chartEl.innerHTML = res.svg || res;
+      } catch (e2) {
+        chartEl.textContent = fallback;
+      }
     }
     const svg = chartEl.querySelector("svg");
 
