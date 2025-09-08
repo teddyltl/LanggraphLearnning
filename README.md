@@ -25,10 +25,19 @@
   .toolbar{display:flex;gap:8px;margin-bottom:8px;align-items:center}
   .toolbar input[type="text"]{flex:1;padding:6px 8px;border:1px solid #d1d5db;border-radius:8px;background:transparent;color:var(--fg)}
   .toolbar textarea{flex:1;padding:6px 8px;border:1px solid #d1d5db;border-radius:8px;background:transparent;color:var(--fg);min-height:120px;resize:vertical}
-  .btn{padding:6px 10px;border:1px solid #d1d5db;border-radius:8px;background:transparent;color:var(--fg);cursor:pointer}
+  .btn{padding:6px 10px;border:1px solid #d1d5db;border-radius:8px;background:transparent;color:var(--fg);cursor:pointer;transition:all 0.2s}
   .btn:hover{border-color:var(--accent)}
+  .btn:disabled{cursor:not-allowed;border-color:#e5e7eb}
+  #prev-layer, #next-layer{min-width:44px;font-size:16px;font-weight:bold;padding:8px 12px}
   .debug-info{font-size:12px;color:var(--muted);margin-top:10px;padding:8px;border:1px solid #e5e7eb;border-radius:4px;background:rgba(0,0,0,0.02)}
-  @media (max-width: 860px){ .wrap{grid-template-columns:1fr} #side{position:static;max-height:none} }
+  @media (max-width: 860px){ 
+    .wrap{grid-template-columns:1fr} 
+    #side{position:static;max-height:none} 
+    .toolbar{flex-wrap:wrap;gap:6px}
+    .toolbar input[type="text"]{min-width:200px;flex:1 1 100%}
+    .btn{font-size:14px}
+    #prev-layer, #next-layer{min-width:48px;padding:10px 14px}
+  }
 </style>
 </head>
 <body>
@@ -55,6 +64,8 @@
     <h2 id="side-title" class="title">悬停左侧节点查看知识点</h2>
     <div class="toolbar">
       <input id="filter" type="text" placeholder="输入关键字快速筛选（例如：Router / 记忆 / thread_id）"/>
+      <button class="btn" id="prev-layer">⬅️ 上一层</button>
+      <button class="btn" id="next-layer">➡️ 下一层</button>
       <button class="btn" id="pin">📌 置顶/取消</button>
       <button class="btn" id="debug-toggle">🔧 调试</button>
     </div>
@@ -148,6 +159,9 @@ flowchart TD
   const debugToggle = document.getElementById("debug-toggle");
   const debugInfo = document.getElementById("debug-info");
   const parseDebug = document.getElementById("parse-debug");
+  const prevLayerBtn = document.getElementById("prev-layer");
+  const nextLayerBtn = document.getElementById("next-layer");
+  const layerOrder = ["L0", "L1", "L2", "L3", "L4", "L5", "L6", "L7", "L8", "L9", "L10", "L11"];
   let pinned = false, currentLayer = null, debugMode = false;
 
   function renderList(layerId){
@@ -203,6 +217,42 @@ flowchart TD
       });
       listEl.appendChild(subList);
     });
+    
+    // 更新导航按钮状态
+    updateNavigationButtons();
+  }
+
+  // 更新导航按钮状态
+  function updateNavigationButtons() {
+    if (!currentLayer) return;
+    
+    const currentIndex = layerOrder.indexOf(currentLayer);
+    prevLayerBtn.disabled = currentIndex <= 0;
+    nextLayerBtn.disabled = currentIndex >= layerOrder.length - 1;
+    
+    prevLayerBtn.style.opacity = prevLayerBtn.disabled ? "0.5" : "1";
+    nextLayerBtn.style.opacity = nextLayerBtn.disabled ? "0.5" : "1";
+  }
+
+  // 导航到指定层级
+  function navigateToLayer(direction) {
+    if (!currentLayer) {
+      renderList("L0");
+      return;
+    }
+    
+    const currentIndex = layerOrder.indexOf(currentLayer);
+    let newIndex;
+    
+    if (direction === 'prev') {
+      newIndex = Math.max(0, currentIndex - 1);
+    } else {
+      newIndex = Math.min(layerOrder.length - 1, currentIndex + 1);
+    }
+    
+    if (newIndex !== currentIndex) {
+      renderList(layerOrder[newIndex]);
+    }
   }
 
   // 事件处理
@@ -214,7 +264,15 @@ flowchart TD
     debugInfo.style.display = debugMode ? "block" : "none";
     debugToggle.textContent = debugMode ? "🔧 调试中" : "🔧 调试";
   });
+  
+  // 导航按钮事件
+  prevLayerBtn.addEventListener("click", () => navigateToLayer('prev'));
+  nextLayerBtn.addEventListener("click", () => navigateToLayer('next'));
+  
   updatePinUI();
+  
+  // 初始化显示L0层
+  renderList("L0");
 
   // 绑定 hover/click 事件
   const svg = chartEl.querySelector("svg");
